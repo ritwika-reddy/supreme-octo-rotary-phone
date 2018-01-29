@@ -1,0 +1,169 @@
+  ACP (Adaptive Controlled Precision) Library
+  for robust computational geometry
+
+  Copyright (c) 2013-07-15
+  Victor Joseph Milenkovic
+  University of Miami
+  vjm@miami.edu
+  Elisha Sacks
+  Purdue University
+  eps@cs.purdue.edu
+
+  This file contains code described in
+
+Robust Complete Path Planning in the Plane
+Victor Milenkovic, Elisha Sacks, and Steven Trac
+Proceedings of the Workshop on the Algorithmic Foundations of Robotics (WAFR)
+pages 37-52, 2012
+
+   This code is under development.
+   It is free for use for academic and research purposes.
+   Permission from the authors is required for commercial use.
+
+
+See geometry3d.h and geometry3d.cc for examples of number classes,
+geometric objects, and primitives.
+
+1 Number classes (acp.h, pv.h)
+
+acp::Parameter (acp.h) represents a real number.
+Parameter provides +, -, *, /, and sqrt().
+
+Parameter::input(double) creates a Parameter from an input value,
+perturbing it to eliminate degeneracies.
+
+Parameter::constant(double) creates a Parameter from a constant value,
+with no perturbation.
+
+acp::PV2 (pv.h) is 2D vector of Parameter.
+acp::PV2::input(double, double) creates a perturbed PV2.
+acp::PV2::constant(double, double) creates an unperturbed PV2.
+
+Similarly PV3 for 3D vectors.
+
+A number class must provide
+  int size (); // number of Parameters in the class
+  Parameter &operator[] (int i); // access to i'th Parameter
+
+
+2 Geometry objects (object.h)
+
+Classes should NOT contain number class members.
+Instead, a geometric object class should extend acp::Object<T> (object.h)
+where T is a number class.
+
+Object<T> provides
+  T get (); // get coordinates of geometric object
+
+In its constructor, an *input* object must call
+  void set(T); // set coordinates of an input geometric object
+
+A *derived* object must override
+  T calculate (); // calculate coordinates of a derived geometry object
+
+Notice that calculate() has no arguments.  This is by design.  It
+forces the programmer to store the arguments to the constructor as
+members (or elsewhere) so calculate can access them later.  This
+allows the ACP library to use lazy evaluation and also recalculate the
+object at higher precision if necessary.
+
+The approximate value of an object is computed by the geApprox method.
+
+Object<P>
+P getApprox(double acc);
+
+Returns a P approximating the object whose Parameters have accuracy acc:
+For each interval [lb,ub],  ub - lb < acc * (max(abs(lb), abs(ub))
+or lb and ub are consecutive representable double precision numbers.
+
+3 Primitives (object.h)
+
+A primitive is a function on the coordinates of geometric objects
+which determines some geometry relationship between them.  For example
+a primitive that takes a point and a plane whose sign indicates on
+which side of the plane the point lies.
+
+A primitive must extend acp::Primitive (object.h) and override
+  int sign (); // the sign of the primitive
+
+Like calculate(), sign() has no arguments.  This permits ACP to call
+it multiple times with increasing amounts of precision until it is
+unambiguous.
+
+To define a primitive, it is easiest to use a macro.  The name of the
+macro is determined by the number of objects which are input to the
+primitive, for example:
+
+Primitive2(PlaneSide, Plane*, plane, Point*, point);
+
+This macro invocation expands to the following declaration:
+
+class PlaneSide : public Primitive {
+  Plane* plane;
+  Point* point;
+  int sign ();
+public:
+  PlaneSide (Plane* plane, Point* point) : plane(plane), point(point) {}
+};
+
+The input arguments to the constructor are stored as members in the
+class for the sign() method to access.
+
+The definition of the sign() method should call plane->get() and
+point->get(), find the value v of the the appropriate function of
+these coordinates, and return v.sign().
+
+The Primitive class provides a public method
+  // evaluate sign() with the appropriate precision and return the result
+  int operator int (); 
+
+The primitive can be invoked as
+
+  if (PlaneSide(myPlane, myPoint) < 0)
+
+Under the rules of C++, this call creates a PlaneSide object on the
+stack and invokes its operator int() method.
+
+
+4 Precision
+
+A Parameter uses interval arithmetic with precision determined by
+Parameter::highPrecision, initially 53, which is double precision.
+Higher precision is handled by the MPFR library.
+
+If a Parameter's interval contains zero, its sign() method doubles
+highPrecision and throws SignException.  However, if highPrecision
+exceeds Parameter::maxPrecision, default 848, it instead throws
+PrecisionException if Parameter::usePrecisionException is true (the
+default) and returns 0 otherwise.
+
+
+Object<T> get() and Primitive operator int() catch SignException and
+call calculate() or sign() again.  (And they will use highPrecision bits.)
+
+If the value of a Primitive is zero to more than maxPrecision bits,
+the program will halt with PrecisionException.  Otherwise, all
+precisions are returned to 53 bits double.
+
+Parameter::input perturbs the input uniformly on
+  [-Parameter::delta, Parameter::delta]
+with Parameter::delta default 2^(-26) (about 1e-8).
+
+Because of the perturbation and the use of multiple precision, a
+PrecisionException usually indicates the evaluation of a primitive
+that is identically zero on all inputs, which is erroneous under ACP.
+
+For example, std::sort will sometimes compare an entry to itself,
+equivalent to asking sign(x - x).  The comparison functor (passed to
+sort) needs to recognize that the object is being compared to itself
+and avoid invoking the comparison Primitive in this case.
+
+
+5 Output
+
+Parameter provides methods
+  double lb (); // lower bound of Parameter interval
+  double ub (); // upper bound of Parameter interval
+  double mid (); // middle of Parameter interval
+  double intervalWidth (); // width of interval
+
